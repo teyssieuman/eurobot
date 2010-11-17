@@ -164,8 +164,8 @@ class Blosh(cmd.Cmd):
       'reset_str': (ShellOptStr, None, "string to reset the device"),
       'hexa': (ShellOptBool, False, "hexadecimal output in terminal mode"),
       'hexa_len': (ShellOptInt, 16, "line length (in bytes) for hexa output"),
-      'echo': (ShellOptBool, False, "display send data in terminal mode"),
-      'eol': (ShellOptEnum('CR','LF','CRLF'), 'CRLF', "[CR|LF|CRLF], EOL of outgoing data from stdin"),
+      'echo': (ShellOptBool, False, "display sent data in terminal mode"),
+      'eol': (ShellOptEnum('CR2CRLF','LF2CRLF','CR2LF','LF2CR','none'), 'LF2CRLF', "EOL transformation for outgoing data from stdin"),
       'switch_way_eol': (ShellOptBool, True, "force an EOL when switching between send and received data"),
       'tkey_quit': (ShellOptKey, '^', "key to quit in terminal mode"),
       'tkey_reset': (ShellOptKey, '^R', "key to reset in terminal mode"),
@@ -189,7 +189,7 @@ class Blosh(cmd.Cmd):
       'alias': ('set [name [commmand]]', "list, set or unset command aliases", """Alias names are replaced by the associated command, then processed as usual. Alias matching is recursive and alias names may shadow built-in command names. Aliases names are not commpleted."""),
       'terminal': ('t[erminal]', "enter terminal mode"),
       'source': ('source <file>', "load commands from a file"),
-      'log': ('log [file]', "set or unset log file", """This command is an alias for 'set filter_cmd'."""),
+      'log': ('log [file]', "set or unset log file", """This command is an alias for 'set log_file'."""),
       'filter': ('filter [cmd]', "set or unset a filter on incoming data", """Data received from the device is send to the filter command. Its output is displayed, stderr data is displayed in a different color.\nTerminal mode is aborted if the process returned a not null code.\nIf hexa output is enabled, no filtering is applied.\nThis command is an alias for 'set filter_cmd'."""),
       'feed': ('feed [cmd]', "set or unset a command providing outgoing data", """Data received from stdin is send to the feeder command. Its output is then sent to the device. stderr data is displayed in a different color.\nTerminal mode is aborted if the process returned a not null code.\neol and tkey_quit are applied before sending data to the feeder; tkey_reset and switch_way_eol are ignored. If hexa output or echo are enabled, they use data returned by the feeder.\nThis command is an alias for 'set feed_cmd'."""),
       'program': ('p[rogram][!] [file.hex]', "program the device", """The given file, or the previous one if none is provided, is uploaded on the device. Without '!', only differences with the previous binary are sent."""),
@@ -311,7 +311,14 @@ class Blosh(cmd.Cmd):
       print self.theme.do_error('several tkey_* share the same value')
       return
 
-    crlf = {'CR':'\r','LF':'\n','CRLF':'\r\n'}[self.opts['eol'].val]
+    eol_from, eol_to = {
+        'CR2CRLF': ('\r', '\r\n'),
+        'LF2CRLF': ('\n', '\r\n'),
+        'CR2LF':   ('\r', '\n'),
+        'LF2CR':   ('\n', '\r'),
+        'none': (None, None),
+        }[ self.opts['eol'].val ]
+
 
     printers_in = []
     printers_out = []
@@ -464,9 +471,11 @@ class Blosh(cmd.Cmd):
 
         if sys.stdin in rds:
           c = sys.stdin.read(1)
-          if c == tkey_quit: break
-          if c == tkey_reset: c = self.opts['reset_str'].val
-          if c == tkey_prog:
+          if c == tkey_quit:
+            break
+          if c == tkey_reset:
+            c = self.opts['reset_str'].val
+          elif c == tkey_prog:
             sys.stdout.write('\r\n')
             # reenable keyboard interrupt
             tio_attr_bak2 = termios.tcgetattr(sys.stdin)
@@ -474,7 +483,8 @@ class Blosh(cmd.Cmd):
             self.reprogram()
             self.bl_exit()
             termios.tcsetattr(sys.stdin, termios.TCSAFLUSH, tio_attr_bak2)
-          if c == '\n': c = crlf
+          elif c == eol_from:
+            c = eol_to
           if pfeed:
             pfeed.stdin.write(c)
           else:
